@@ -1,0 +1,319 @@
+
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>單字背誦小工具（含拼寫練習 + RWD）</title>
+    <script src="vocab_all.js"></script>
+    <style>
+      body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(to right, #dfe9f3, #ffffff);
+        padding: 30px;
+        margin: 0;
+      }
+      .quiz-box {
+        max-width: 650px;
+        margin: auto;
+        background: #fff;
+        padding: 40px 30px;
+        border-radius: 16px;
+        box-shadow: 0 12px 24px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+      }
+      h2 {
+        text-align: center;
+        font-size: 24px;
+        color: #333;
+        margin-bottom: 12px;
+      }
+      .mode-label {
+        text-align: center;
+        font-size: 14px;
+        color: #666;
+        margin-bottom: 24px;
+      }
+      .options button,
+      .options input[type="text"] {
+        display: block;
+        margin: 10px 0;
+        width: 100%;
+        padding: 14px 16px;
+        font-size: 16px;
+        border: 1px solid #ccc;
+        border-radius: 10px;
+        box-sizing: border-box;
+        transition: background-color 0.2s ease;
+      }
+      .options button {
+        background-color: #f9f9f9;
+        cursor: pointer;
+      }
+      .options button:hover {
+        background-color: #f0f0f0;
+      }
+      .options button.correct {
+        background-color: #d4edda;
+        border-color: #c3e6cb;
+      }
+      .options button.wrong {
+        background-color: #f8d7da;
+        border-color: #f5c6cb;
+      }
+      .result, .score {
+        text-align: center;
+        font-weight: bold;
+        margin-top: 20px;
+        font-size: 16px;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 10px;
+        margin-top: 30px;
+      }
+      .controls button {
+        padding: 10px 20px;
+        font-size: 14px;
+        border: none;
+        border-radius: 8px;
+        background-color: #007bff;
+        color: white;
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+      }
+      .controls button:hover {
+        background-color: #0056b3;
+      }
+      .progress-container {
+        width: 100%;
+        height: 12px;
+        background-color: #eee;
+        border-radius: 6px;
+        overflow: hidden;
+        margin-top: 16px;
+      }
+      .progress-fill {
+        height: 100%;
+        background: linear-gradient(to right, #28a745, #70e000);
+        width: 0%;
+        transition: width 0.3s ease;
+      }
+      @media (max-width: 600px) {
+        .quiz-box {
+          padding: 20px 16px;
+          border-radius: 12px;
+        }
+        .controls button {
+          font-size: 13px;
+        }
+      }
+    </style>
+  </head>
+<body>
+  <div class="quiz-box">
+    <h2 id="question">載入中...</h2>
+    <div class="mode-label">目前模式：<span id="modeText">英翻中</span></div>
+    <div class="progress-container"><div id="progressFill" class="progress-fill"></div></div>
+    <div id="options" class="options"></div>
+    <div class="result" id="result"></div>
+    <div class="score" id="score"></div>
+    <div class="controls">
+    
+      <!--<button onclick="prevQuestion()">上一題</button>
+      <button onclick="nextQuestion()">下一題</button>-->
+      <button onclick="toggleMode()">切換題型</button>
+      <button onclick="resetStats()">重新開始</button>
+      <button onclick="showMistakes()">查看錯題</button>
+    </div>
+  </div>
+  <audio id="audioCorrect" src="correct.mp3" preload="auto"></audio>
+  <audio id="audioWrong" src="wrong.mp3" preload="auto"></audio>
+
+  <script>
+    let mode = 'en-to-zh';
+    let current = {};
+    let correct = "";
+    let total = 0;
+    let correctCount = 0;
+    let currentIndex = 0;
+    let locked = false;
+    let history = [];
+    let mistakes = [];
+
+    function shuffle(arr) {
+      return arr.sort(() => Math.random() - 0.5);
+    }
+
+    function showQuestion(fromHistory = false, restore = null) {
+      locked = false;
+      document.getElementById("result").textContent = "";
+
+      if (restore) {
+        mode = restore.mode;
+        current = restore.question;
+        correct = restore.answer;
+        renderQuestion();
+        return;
+      }
+
+      if (!fromHistory) {
+        history.push({ mode, currentIndex, question: current, answer: correct });
+      }
+
+      if (mode === 'sequential') {
+        if (currentIndex >= vocabList.length) {
+          document.getElementById("question").textContent = "🎉 恭喜，已完成全部單字練習！";
+          document.getElementById("options").innerHTML = "";
+          updateProgress();
+          return;
+        }
+        current = vocabList[currentIndex];
+        correct = current.zh;
+        document.getElementById("question").textContent = `(${currentIndex + 1}/${vocabList.length}) 「${current.en}」的中文是？`;
+        renderOptions(generateOptions(correct, 'en-to-zh'), fromHistory);
+      } else if (mode === 'spell') {
+        current = vocabList[Math.floor(Math.random() * vocabList.length)];
+        correct = current.en.toLowerCase();
+        document.getElementById("question").textContent = `請拼出：「${current.zh}」的英文單字`;
+        renderSpellingInput();
+      } else {
+        current = vocabList[Math.floor(Math.random() * vocabList.length)];
+        correct = mode === 'en-to-zh' ? current.zh : current.en;
+        document.getElementById("question").textContent = mode === 'en-to-zh'
+          ? `「${current.en}」的中文是？`
+          : `「${current.zh}」的英文是？`;
+        renderOptions(generateOptions(correct, mode), fromHistory);
+      }
+
+      document.getElementById("modeText").textContent =
+        mode === 'en-to-zh' ? '英翻中' :
+        mode === 'zh-to-en' ? '中翻英' :
+        mode === 'sequential' ? '順序練習' :
+        '拼寫練習';
+
+      updateScore();
+      updateProgress();
+    }
+
+    function renderOptions(optionList, fromHistory = false) {
+      const container = document.getElementById("options");
+      container.innerHTML = "";
+      optionList.forEach(opt => {
+        const btn = document.createElement("button");
+        btn.textContent = opt;
+        btn.onclick = () => handleAnswer(opt, fromHistory);
+        container.appendChild(btn);
+      });
+    }
+
+    function renderSpellingInput() {
+      const container = document.getElementById("options");
+      container.innerHTML = "";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "請輸入英文單字";
+      input.autofocus = true;
+      input.onkeydown = (e) => {
+        if (e.key === "Enter") handleAnswer(input.value.toLowerCase());
+      };
+      container.appendChild(input);
+      input.focus();
+    }
+
+    function handleAnswer(answer, fromHistory = false) {
+      if (locked) return;
+      locked = true;
+      total++;
+      if (answer === correct) {
+        correctCount++;
+        document.getElementById("result").textContent = "✅ 答對了！";
+        document.getElementById("audioCorrect").play();
+      } else {
+        document.getElementById("result").textContent = `❌ 錯了，正解是：${correct}`;
+        document.getElementById("audioWrong").play();
+        mistakes.push({ mode, question: current, correct });
+      }
+      if (mode === 'sequential') currentIndex++;
+      updateScore();
+      updateProgress();
+      setTimeout(() => nextQuestion(), 1000);
+    }
+
+    function generateOptions(correctAnswer, mode) {
+      let options = [correctAnswer];
+      while (options.length < 4) {
+        const candidate = mode === 'en-to-zh'
+          ? vocabList[Math.floor(Math.random() * vocabList.length)].zh
+          : vocabList[Math.floor(Math.random() * vocabList.length)].en;
+        if (!options.includes(candidate)) options.push(candidate);
+      }
+      return shuffle(options);
+    }
+
+    function updateScore() {
+      document.getElementById("score").textContent = `🎯 答對 ${correctCount} / ${total} 題`;
+    }
+
+    function updateProgress() {
+      const percent = mode === 'sequential'
+        ? Math.floor((currentIndex / vocabList.length) * 100)
+        : Math.floor((total > 0 ? (correctCount / total) : 0) * 100);
+      document.getElementById("progressFill").style.width = percent + "%";
+    }
+
+    function nextQuestion() {
+      showQuestion();
+    }
+
+    function prevQuestion() {
+      if (history.length > 0) {
+        const last = history.pop();
+        showQuestion(true, last);
+      } else {
+        alert("🚫 沒有上一題了！");
+      }
+    }
+
+    function toggleMode() {
+      if (mode === 'en-to-zh') {
+        mode = 'zh-to-en';
+      } else if (mode === 'zh-to-en') {
+        mode = 'sequential';
+      } else if (mode === 'sequential') {
+        mode = 'spell';
+      } else {
+        mode = 'en-to-zh';
+      }
+      showQuestion();
+    }
+
+    function resetStats() {
+      total = 0;
+      correctCount = 0;
+      currentIndex = 0;
+      history = [];
+      mistakes = [];
+      showQuestion();
+    }
+
+    function showMistakes() {
+      let list = mistakes.map(m => {
+        return `<li>${m.question.en} ➤ <strong>${m.correct}</strong></li>`;
+      }).join('');
+      document.querySelector(".quiz-box").innerHTML = `
+        <h2>❌ 錯誤記錄</h2>
+        <ul style="text-align:left">${list || "<li>目前沒有錯題！</li>"}</ul>
+        <div class="controls" style="text-align:center; margin-top:20px;">
+          <button onclick="resetStats()">重新開始</button>
+          <button onclick="window.location.reload()">回到練習</button>
+        </div>
+      `;
+    }
+
+    window.onload = showQuestion;
+  </script>
+</body>
+</html>
